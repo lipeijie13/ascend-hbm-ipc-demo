@@ -28,6 +28,7 @@ int main(int argc, char **argv)
         for (size_t i = 0; i < host.size(); ++i) {
             host[i] = PatternByte(i);
         }
+        PrintHexPreview("[Client] 初始 pattern", host.data(), host.size());
         CheckAcl(aclrtMemcpy(owner.Get(), owner.Size(), host.data(), host.size(), ACL_MEMCPY_HOST_TO_DEVICE),
                  "aclrtMemcpy(H2D initial pattern)");
 
@@ -61,6 +62,7 @@ int main(int argc, char **argv)
 
             CheckAcl(aclrtMemcpy(host.data(), host.size(), owner.Get(), owner.Size(), ACL_MEMCPY_DEVICE_TO_HOST),
                      "aclrtMemcpy(D2H owner verification)");
+            PrintHexPreview("[Client] 从 owner_ptr 读回 Worker 修改后的数据", host.data(), host.size());
             for (size_t i = 0; i < host.size(); ++i) {
                 const uint8_t expected = i < kMutationSize ? kMutationValue : PatternByte(i);
                 if (host[i] != expected) {

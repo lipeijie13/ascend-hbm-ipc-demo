@@ -3,12 +3,15 @@
 
 #include <acl/acl_rt.h>
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <iomanip>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -401,6 +404,7 @@ public:
                  "aclrtIpcMemGetExportKey");
         open_ = true;
         try {
+            // 【可选】设置worker进程到白名单，不调用时默认不启动白名单校验。
             CheckAcl(aclrtIpcMemSetImportPid(key_.data(), &workerBarePid, 1),
                      "aclrtIpcMemSetImportPid");
         } catch (...) {
@@ -504,6 +508,21 @@ private:
 inline uint8_t PatternByte(size_t index)
 {
     return static_cast<uint8_t>((index * 131U + 17U) % 251U);
+}
+
+inline void PrintHexPreview(const std::string &label, const uint8_t *data, size_t size,
+                            size_t maxBytes = kMutationSize)
+{
+    const size_t bytes = std::min(size, maxBytes);
+    std::ostringstream output;
+    output << label << "（打印前 " << bytes << "/" << size << " 字节）";
+    for (size_t i = 0; i < bytes; ++i) {
+        if (i % 16 == 0) {
+            output << "\n  [" << std::setw(4) << std::setfill('0') << i << "] ";
+        }
+        output << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned int>(data[i]) << ' ';
+    }
+    std::cout << output.str() << std::dec << std::endl;
 }
 
 inline int32_t ParseDeviceId(const char *value)

@@ -35,6 +35,7 @@ int main(int argc, char **argv)
         std::vector<uint8_t> host(static_cast<size_t>(descriptor.size));
         CheckAcl(aclrtMemcpy(host.data(), host.size(), imported.Get(), host.size(), ACL_MEMCPY_DEVICE_TO_HOST),
                  "aclrtMemcpy(D2H imported verification)");
+        PrintHexPreview("[Worker] 从 imported_ptr 读到的初始数据", host.data(), host.size());
         for (size_t i = 0; i < host.size(); ++i) {
             if (host[i] != PatternByte(i)) {
                 throw std::runtime_error("Worker verification failed at byte " + std::to_string(i));
@@ -51,6 +52,8 @@ int main(int argc, char **argv)
         CheckAcl(aclrtMemcpy(imported.Get(), static_cast<size_t>(descriptor.size), mutation.data(), mutation.size(),
                             ACL_MEMCPY_HOST_TO_DEVICE),
                  "aclrtMemcpy(H2D imported mutation)");
+        std::fill_n(host.begin(), kMutationSize, kMutationValue);
+        PrintHexPreview("[Worker] 写入 imported_ptr 后的数据", host.data(), host.size());
 
         WireMessage modified = MakeMessage(MessageType::kModified);
         modified.deviceId = deviceId;
