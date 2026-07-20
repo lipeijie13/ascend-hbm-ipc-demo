@@ -26,7 +26,7 @@ Common environment variables:
   XDS_BUILD_MODULE=0|1    Build p2p_dev.ko in XDS mode (default: 1)
   XDS_LOAD_MODULE=0|1     Load p2p_dev with sudo when needed (default: 0)
   XDS_FILE=PATH           Existing SSD source file; omitted creates a temporary file
-  XDS_FILE_DIR=PATH       Directory for the temporary source file (default: /tmp)
+  XDS_FILE_DIR=PATH       Directory for the temporary source file (default: repository root)
   XDS_BLOCK_DEVICE=PATH   Block device backing XDS_FILE; auto-detected if omitted
   XDS_FILE_OFFSET=BYTES   512-byte-aligned source offset (default: 0)
   XDS_VF_ID=ID            Ascend virtual-function ID (default: 0)

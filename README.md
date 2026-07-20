@@ -224,7 +224,8 @@ Worker 在该分支不调用 `aclrtMemcpy` 搬运 payload。它把 `aclrtIpcMemI
 `read_parameter.addr`，`read_file` 成功后调用 `drain_read`，只有 drain 成功才通知 Client。Client 随后从 Owner VA
 D2H 并逐字节对比源文件范围。
 
-使用脚本自动在 `/tmp` 创建并清理测试文件、自动解析文件系统块设备：
+使用脚本自动在仓库根目录创建并清理测试文件、自动解析文件系统块设备。在容器内运行时，仓库目录应位于
+本地 NVMe 的 bind mount 上；脚本会拒绝 Docker OverlayFS：
 
 ```bash
 XDS_ENABLE=1 bash scripts/run_demo.sh 0 2097152

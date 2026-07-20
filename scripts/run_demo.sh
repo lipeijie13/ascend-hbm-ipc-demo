@@ -8,7 +8,7 @@ BUFFER_SIZE=${2:-2097152}
 SOCKET_PATH=${SOCKET_PATH:-"/tmp/ascend-hbm-ipc-${UID}-$$.sock"}
 XDS_ENABLE=${XDS_ENABLE:-0}
 XDS_FILE=${XDS_FILE:-}
-XDS_FILE_DIR=${XDS_FILE_DIR:-/tmp}
+XDS_FILE_DIR=${XDS_FILE_DIR:-"${ROOT_DIR}"}
 XDS_BLOCK_DEVICE=${XDS_BLOCK_DEVICE:-}
 XDS_FILE_OFFSET=${XDS_FILE_OFFSET:-0}
 XDS_VF_ID=${XDS_VF_ID:-0}
@@ -72,6 +72,10 @@ if [[ "${XDS_ENABLE}" == "1" ]]; then
 
     required_file_size=$((XDS_FILE_OFFSET + BUFFER_SIZE))
     if [[ -z "${XDS_FILE}" ]]; then
+        if [[ ! -d "${XDS_FILE_DIR}" || ! -w "${XDS_FILE_DIR}" ]]; then
+            echo "XDS_FILE_DIR is not a writable directory: ${XDS_FILE_DIR}" >&2
+            exit 2
+        fi
         XDS_FILE=$(mktemp --tmpdir="${XDS_FILE_DIR}" "ascend-hbm-xds-${UID}-XXXXXX.bin")
         generated_xds_file=1
         block_count=$(((required_file_size + 1048575) / 1048576))
@@ -91,7 +95,11 @@ if [[ "${XDS_ENABLE}" == "1" ]]; then
     fi
 
     if [[ -z "${XDS_BLOCK_DEVICE}" ]]; then
-        XDS_BLOCK_DEVICE=$(findmnt -n -o SOURCE -T "${XDS_FILE}")
+        XDS_BLOCK_DEVICE=$(findmnt --nofsroot --evaluate -n -o SOURCE -T "${XDS_FILE}")
+        if [[ "${XDS_BLOCK_DEVICE}" != /dev/* ]]; then
+            echo "XDS source file is on ${XDS_BLOCK_DEVICE}, not a local block device; place XDS_FILE on the NVMe bind mount or set XDS_FILE_DIR accordingly" >&2
+            exit 2
+        fi
     fi
     XDS_BLOCK_DEVICE=$(readlink -f "${XDS_BLOCK_DEVICE}")
     if [[ ! -b "${XDS_BLOCK_DEVICE}" || ! -r "${XDS_BLOCK_DEVICE}" ]]; then
