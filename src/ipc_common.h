@@ -26,12 +26,14 @@
 namespace ascend_hbm_ipc_demo {
 
 constexpr uint32_t kProtocolMagic = 0x41495043U;  // "AIPC"
-constexpr uint32_t kProtocolVersion = 1;
+constexpr uint32_t kProtocolVersion = 2;
+constexpr uint32_t kWireFlagXdsRead = 1U << 0;
 constexpr size_t kIpcKeyLength = 65;
 constexpr size_t kHugePageSize = 2UL * 1024UL * 1024UL;
 constexpr size_t kDefaultBufferSize = kHugePageSize;
 constexpr size_t kMutationSize = 64;
 constexpr uint8_t kMutationValue = 0xA5;
+constexpr uint8_t kXdsPoisonValue = 0x3C;
 constexpr int kSocketTimeoutSeconds = 30;
 
 enum class MessageType : uint32_t {
@@ -50,7 +52,7 @@ struct WireMessage {
     uint32_t magic;
     uint32_t version;
     uint32_t type;
-    uint32_t reserved;
+    uint32_t flags;
     int32_t deviceId;
     int32_t barePid;
     uint64_t bufferId;
@@ -543,6 +545,21 @@ inline size_t ParseBufferSize(const char *value)
         throw std::runtime_error("buffer size must be a positive multiple of 2 MiB");
     }
     return static_cast<size_t>(result);
+}
+
+inline uint64_t ParseUint64(const char *value, const char *name)
+{
+    const std::string text(value == nullptr ? "" : value);
+    if (text.empty()
+        || std::any_of(text.begin(), text.end(), [](char character) { return character < '0' || character > '9'; })) {
+        throw std::runtime_error(std::string("invalid ") + name);
+    }
+    size_t consumed = 0;
+    const unsigned long long result = std::stoull(text, &consumed);
+    if (consumed != text.size()) {
+        throw std::runtime_error(std::string("invalid ") + name);
+    }
+    return static_cast<uint64_t>(result);
 }
 
 }  // namespace ascend_hbm_ipc_demo

@@ -1,10 +1,13 @@
 cmake_minimum_required(VERSION 3.16)
-project(ascend_hbm_ipc_demo LANGUAGES CXX)
+project(ascend_hbm_ipc_demo LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+option(ENABLE_XDS "Build the optional XDS SSD-to-HBM validation path" OFF)
+include(CTest)
 
 if(DEFINED ENV{ASCEND_HOME_PATH})
   set(ASCEND_ROOT "$ENV{ASCEND_HOME_PATH}")
@@ -36,6 +39,25 @@ endif()
 
 add_executable(client src/client.cpp)
 add_executable(worker src/worker.cpp)
+
+if(ENABLE_XDS)
+  add_subdirectory(third_party/xds)
+  target_sources(worker PRIVATE src/xds_reader.cpp)
+  target_link_libraries(worker PRIVATE xds_file_p2p)
+  target_compile_definitions(worker PRIVATE ASCEND_HBM_IPC_DEMO_ENABLE_XDS=1)
+
+  if(BUILD_TESTING)
+    add_executable(xds_reader_test
+      tests/xds_reader_test.cpp
+      src/xds_reader.cpp)
+    target_include_directories(xds_reader_test PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(xds_reader_test PRIVATE xds_file_p2p)
+    target_compile_options(xds_reader_test PRIVATE
+      -Wall -Wextra -Wpedantic -Werror)
+    add_test(NAME xds_reader_preflight COMMAND xds_reader_test)
+  endif()
+endif()
 
 foreach(target client worker)
   target_include_directories(${target} PRIVATE

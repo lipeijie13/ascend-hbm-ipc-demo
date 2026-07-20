@@ -4,9 +4,11 @@
 
 - `client`：HBM Owner，调用 `aclrtMalloc`、导出 IPC Key，并最终释放原始 HBM；
 - `worker`：Importer，通过 Key 获得自己的 Device VA，读取并原地修改同一物理 HBM；
+- 可选 XDS 路径：Worker 把导入后的本进程 Device VA 交给 XDS，直接从 SSD 文件读取到共享 HBM；
 - `scripts/run_demo.sh`：构建并拉起 Worker、Client 两个进程。
 
-Demo 默认要求两个进程使用同一个 Device ID。它验证 ACL IPC 映射和同步 Memcpy，不包含 HIXL、HCCS 或 RDMA 注册。
+Demo 默认要求两个进程使用同一个 Device ID。默认模式验证 ACL IPC 映射和同步 Memcpy；开启 XDS 后验证
+SSD 文件是否能写入 Worker 导入的 Client HBM。两种模式都不包含 HIXL、HCCS 或 RDMA 注册。
 
 ## 原理
 
@@ -79,11 +81,20 @@ sequenceDiagram
 ascend-hbm-ipc-demo/
 ├── CMakeLists.txt
 ├── README.md
+├── build.sh
 ├── scripts/
-│   └── run_demo.sh
+│   ├── run_demo.sh
+│   └── xds_module.sh
+├── tests/
+│   └── xds_reader_test.cpp
+├── third_party/xds/
+│   ├── file_p2p/
+│   └── p2p_dev.c
 └── src/
     ├── client.cpp
     ├── ipc_common.h
+    ├── xds_reader.cpp
+    ├── xds_reader.h
     └── worker.cpp
 ```
 
@@ -93,6 +104,13 @@ ascend-hbm-ipc-demo/
 - 匹配的驱动、固件和 CANN Runtime；
 - 两个进程都能访问相同的 `/dev/davinci*` 设备；
 - 已加载 CANN 环境变量。
+
+XDS 模式还要求：
+
+- 源文件位于 XDS 支持的本地 NVMe 文件系统，文件 offset、目标 HBM VA 和 size 均为 512 字节对齐；
+- 实验内核、NVMe 驱动和 Ascend 驱动导出 XDS 所需符号；
+- 管理员已加载匹配当前内核的 `p2p_dev.ko`，运行用户可访问 `/dev/p2p_device` 和源块设备；
+- XDS I/O 完成前，源文件、Worker 导入映射和 Client Owner allocation 都保持存活。
 
 例如：
 
@@ -110,7 +128,54 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ```
 
+构建 XDS 用户态路径并运行无硬件预检测试：
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_XDS=ON
+cmake --build build -j
+ctest --test-dir build --output-on-failure
+```
+
+内核模块是显式管理动作，不属于默认构建或 Worker 启动流程：
+
+```bash
+cmake --build build --target xds_kernel_module
+bash scripts/xds_module.sh status
+# 由管理员确认兼容性后执行：
+sudo bash scripts/xds_module.sh load
+```
+
 ## 一键拉起两个进程
+
+构建、测试并执行 XDS SSD→共享 HBM 验证（默认 Device 0、2 MiB）：
+
+```bash
+./build.sh
+```
+
+若 `/dev/p2p_device` 尚未就绪，可在管理员确认模块兼容后允许脚本调用 `sudo` 加载：
+
+```bash
+XDS_LOAD_MODULE=1 ./build.sh
+```
+
+指定已有 SSD 文件、块设备、Device ID 和 Buffer 大小：
+
+```bash
+XDS_FILE=/mnt/nvme/xds-test.bin \
+XDS_BLOCK_DEVICE=/dev/nvme0n1p2 \
+./build.sh 0 2097152
+```
+
+仅运行原有非 XDS HBM IPC 验证：
+
+```bash
+XDS_ENABLE=0 ./build.sh
+```
+
+`build.sh --help` 可查看全部环境变量。默认只构建内核模块，不自动加载；模块加载属于显式管理员操作。
+
+也可以直接调用底层运行脚本：
 
 默认使用 Device 0 和 2 MiB HBM：
 
@@ -142,6 +207,44 @@ PASS: two process-local Device VAs accessed the same physical HBM
 ```
 
 程序默认只打印前 64 字节，既能观察共享前后的变化，也避免大 Buffer 测试时刷屏；完整 Buffer 仍会逐字节校验。
+
+## XDS SSD→共享 HBM 验证
+
+`XDS_ENABLE=1` 时，脚本会以 `ENABLE_XDS=ON` 构建并运行以下路径：
+
+```mermaid
+flowchart LR
+    S["SSD source file"] -->|"XDS read_file + drain_read"| W["Worker imported_ptr"]
+    C["Client owner_ptr"] --> H["同一物理 HBM"]
+    W --> H
+    H -->|"Client D2H verification"| V["compare with source range"]
+```
+
+Worker 在该分支不调用 `aclrtMemcpy` 搬运 payload。它把 `aclrtIpcMemImportByKey` 返回的 Worker 本地 VA 直接写入
+`read_parameter.addr`，`read_file` 成功后调用 `drain_read`，只有 drain 成功才通知 Client。Client 随后从 Owner VA
+D2H 并逐字节对比源文件范围。
+
+使用脚本自动在 `/tmp` 创建并清理测试文件、自动解析文件系统块设备：
+
+```bash
+XDS_ENABLE=1 bash scripts/run_demo.sh 0 2097152
+```
+
+使用已准备好的 SSD 文件和显式块设备：
+
+```bash
+XDS_ENABLE=1 \
+XDS_FILE=/mnt/nvme/xds-test.bin \
+XDS_BLOCK_DEVICE=/dev/nvme0n1p2 \
+XDS_FILE_OFFSET=0 \
+XDS_VF_ID=0 \
+bash scripts/run_demo.sh 0 2097152
+```
+
+脚本不会修改显式传入的 `XDS_FILE`；其大小必须覆盖 `XDS_FILE_OFFSET + BUFFER_SIZE`，运行期间也不能被改写、
+截断或删除。`PASS` 表示 XDS drain 完成后 Client Owner VA 中的字节与 SSD 文件范围一致，并验证了
+“XDS 可写 Worker 导入 VA”这一功能链路。若还要证明 DMA 未经 Host DRAM，应同时采集 NVMe/PCIe trace、Ascend
+counter 或内存带宽指标；仅凭最终字节一致不能证明物理 DMA 路径。
 
 ## 手工启动
 
