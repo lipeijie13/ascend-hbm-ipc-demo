@@ -35,6 +35,8 @@ constexpr size_t kMutationSize = 64;
 constexpr uint8_t kMutationValue = 0xA5;
 constexpr uint8_t kXdsPoisonValue = 0x3C;
 constexpr int kSocketTimeoutSeconds = 30;
+constexpr aclrtMemMallocPolicy kHbmAllocationPolicy = ACL_MEM_MALLOC_HUGE_FIRST;
+constexpr uint64_t kHbmExportFlags = ACL_RT_IPC_MEM_EXPORT_FLAG_DISABLE_PID_VALIDATION;
 
 enum class MessageType : uint32_t {
     kHello = 1,
@@ -335,7 +337,7 @@ class OwnedDeviceBuffer {
 public:
     explicit OwnedDeviceBuffer(size_t size) : size_(size)
     {
-        CheckAcl(aclrtMalloc(&ptr_, size_, ACL_MEM_MALLOC_HUGE_ONLY), "aclrtMalloc");
+        CheckAcl(aclrtMalloc(&ptr_, size_, kHbmAllocationPolicy), "aclrtMalloc");
     }
 
     ~OwnedDeviceBuffer()
@@ -395,7 +397,7 @@ public:
     ExportedIpcMemory(void *devicePtr, size_t size)
     {
         CheckAcl(aclrtIpcMemGetExportKey(devicePtr, size, key_.data(), key_.size(),
-                                         ACL_RT_IPC_MEM_EXPORT_FLAG_DEFAULT),
+                                         kHbmExportFlags),
                  "aclrtIpcMemGetExportKey");
         open_ = true;
     }

@@ -31,6 +31,8 @@
 #include "p2p_mem_query.h"
 
 #define HW_LIMIT_SIZE (128U << 10)
+/* Keep passthrough requests below the NVMe tag depth on vendor kernels. */
+#define P2P_MAX_INFLIGHT_REQUESTS 32U
 
 u64 g_time = 0;
 u64 g_count = 0;
@@ -59,6 +61,7 @@ struct p2p_io_context {
     u64 pa_addr;
     u64 pa_bytes;
     bool pa_pinned;
+    unsigned int inflight;
 };
 
 struct p2p_batch {
@@ -99,6 +102,8 @@ static int p2p_open(struct inode *inode, struct file *file);
 static int p2p_release(struct inode *inode, struct file *file);
 static long p2p_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
 static int p2p_drain_read(struct p2p_batch *batch);
+static int wait_io_done(struct p2p_io_context *io_ctx);
+static int wait_and_rearm_io(struct p2p_io_context *io_ctx);
 
 static struct file_operations fops = {
     .owner = THIS_MODULE,
@@ -497,11 +502,14 @@ static int do_read_io(struct p2p_io_context *io_ctx, unsigned long long sector, 
     struct gendisk *disk = io_ctx->bdev->bd_disk;
     struct request_queue *queue = disk->queue;
     struct request *req;
-    struct nvme_command *cmd = &io_ctx->cmd_list[io_ctx->cmd_id];
+    struct nvme_command *cmd;
+    int err;
+
     if (io_ctx->cmd_id >= io_ctx->count) {
         pr_err("cmd_id %d >= count %d\n", io_ctx->cmd_id, io_ctx->count);
         return -EINVAL;
     }
+    cmd = &io_ctx->cmd_list[io_ctx->cmd_id];
 
     pr_debug("read from blk 0x%x0x%llx to pa 0x%llx\n", sector_nr, sector, paddr);
 
@@ -532,8 +540,10 @@ static int do_read_io(struct p2p_io_context *io_ctx, unsigned long long sector, 
     req = nvme_alloc_request(queue, cmd, 0, -1);
 #endif
     if (IS_ERR(req)) {
-        pr_err("Failed to alloc request\n");
-        return -ENOMEM;
+        err = PTR_ERR(req);
+        pr_err("p2p_dev: failed to allocate NVMe request ret=%d cmd_count=%d inflight=%u\n",
+               err, io_ctx->cmd_id, io_ctx->inflight);
+        return err;
     }
 
     req->rq_flags |= RQF_NVME_PT;
@@ -553,6 +563,10 @@ static int do_read_io(struct p2p_io_context *io_ctx, unsigned long long sector, 
 #else
     blk_execute_rq_nowait(queue, disk, req, true, end_read_io);
 #endif
+
+    io_ctx->inflight++;
+    if (io_ctx->inflight == P2P_MAX_INFLIGHT_REQUESTS)
+        return wait_and_rearm_io(io_ctx);
 
     return 0;
 }
@@ -598,6 +612,27 @@ static unsigned int calc_read_size(struct p2p_io_context *io_ctx, unsigned int l
     return to_read;
 }
 
+static int wait_io_done(struct p2p_io_context *io_ctx)
+{
+    if (!atomic_dec_and_test(&io_ctx->io_ref)) {
+        wait_for_completion_io(&io_ctx->io_done);
+    }
+    return io_ctx->io_err;
+}
+
+static int wait_and_rearm_io(struct p2p_io_context *io_ctx)
+{
+    int io_err = wait_io_done(io_ctx);
+
+    /* wait_io_done consumes the sentinel; restore it for the next chunk or final drain. */
+    reinit_completion(&io_ctx->io_done);
+    atomic_set(&io_ctx->io_ref, 1);
+    io_ctx->inflight = 0;
+    if (io_err)
+        return blk_status_to_errno(io_err);
+    return 0;
+}
+
 static int do_read_ios(struct p2p_io_context *io_ctx, struct fiemap_extent *extents, unsigned int nr)
 {
     unsigned int i;
@@ -607,13 +642,12 @@ static int do_read_ios(struct p2p_io_context *io_ctx, struct fiemap_extent *exte
         unsigned long long sector = extents[i].fe_physical >> SECTOR_SHIFT;
         unsigned int left = extents[i].fe_length >> SECTOR_SHIFT;
         unsigned int to_read;
-        int err;
 
         while (left > 0) {
             to_read = calc_read_size(io_ctx, left);
             if (!to_read) {
                 err = -EINVAL;
-                break;
+                goto out;
             }
             err = do_read_io(io_ctx, sector, to_read, cur_pa(io_ctx));
             if (err) {
@@ -643,13 +677,12 @@ static int do_read_ios_batch(struct p2p_io_context *io_ctx, struct fiemap_extent
         unsigned long long sector = extents[i].fe_physical >> SECTOR_SHIFT;
         unsigned int left = extents[i].fe_length >> SECTOR_SHIFT;
         unsigned int to_read;
-        int err;
 
         while (left > 0) {
             to_read = calc_read_size(io_ctx, left);
             if (!to_read) {
                 err = -EINVAL;
-                break;
+                goto out;
             }
 
             if (count + to_read > size) {
@@ -688,14 +721,6 @@ static int do_read_ios_batch(struct p2p_io_context *io_ctx, struct fiemap_extent
 
 out:
     return err;
-}
-
-static int wait_io_done(struct p2p_io_context *io_ctx)
-{
-    if (!atomic_dec_and_test(&io_ctx->io_ref)) {
-        wait_for_completion_io(&io_ctx->io_done);
-    }
-    return io_ctx->io_err;
 }
 
 static unsigned long long calc_data_size(struct fiemap_extent *extents, unsigned int nr)

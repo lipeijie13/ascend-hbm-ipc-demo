@@ -59,6 +59,13 @@ int main(int argc, char **argv)
             source, "static int get_pa_list(", "static int get_pa_list_batch(");
         const std::string freeIoContext = FunctionBody(
             source, "static void free_io_ctx(", "static struct p2p_io_context *new_io_ctx(");
+        const std::string waitAndRearm = FunctionBody(
+            source, "static int wait_and_rearm_io(struct p2p_io_context *io_ctx)\n{",
+            "static int do_read_ios(");
+        const std::string doReadIo = FunctionBody(
+            source, "static int do_read_io(", "static unsigned int cur_pa_remain_sector(");
+        const std::string doReadIos = FunctionBody(
+            source, "static int do_read_ios(", "static int do_read_ios_batch(");
         const std::string readFile = FunctionBody(
             source, "static int p2p_read_file(", "static int p2p_drain_read(");
 
@@ -78,8 +85,22 @@ int main(int argc, char **argv)
                         "I/O context teardown does not release the HBM PA pin");
         RequireContains(readFile, "int err = 0;",
                         "p2p_read_file success return value is uninitialized");
+        RequireNotContains(doReadIos, "int err;",
+                           "do_read_ios shadows the return error and reports a partial submission as success");
+        RequireContains(source, "#define P2P_MAX_INFLIGHT_REQUESTS 32U",
+                        "single-read requests have no bounded in-flight limit");
+        RequireContains(waitAndRearm, "wait_io_done(io_ctx)",
+                        "the in-flight limiter does not wait for the current request chunk");
+        RequireContains(waitAndRearm, "reinit_completion(&io_ctx->io_done)",
+                        "the in-flight limiter does not rearm completion for the next chunk");
+        RequireContains(waitAndRearm, "atomic_set(&io_ctx->io_ref, 1)",
+                        "the in-flight limiter does not restore the completion sentinel");
+        RequireContains(doReadIo, "io_ctx->inflight == P2P_MAX_INFLIGHT_REQUESTS",
+                        "request submission does not enforce the bounded in-flight limit");
+        RequireContains(doReadIo, "wait_and_rearm_io(io_ctx)",
+                        "request submission does not drain requests between bounded chunks");
 
-        std::cout << "PASS: single-read HBM PA remains pinned until I/O context teardown" << std::endl;
+        std::cout << "PASS: XDS keeps HBM pinned, bounds in-flight I/O, and propagates issue errors" << std::endl;
         return 0;
     } catch (const std::exception &error) {
         std::cerr << "FAIL: " << error.what() << std::endl;
