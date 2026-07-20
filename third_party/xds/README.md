@@ -9,6 +9,10 @@ validation path:
 The files were copied from the `yuanrong-datasystem` `xds` branch after its
 post-`6576f2d9` correctness fixes. That branch is the source of truth for this
 demo snapshot. The userspace library is built only with `ENABLE_XDS=ON`.
+Callers must set `read_parameter.hostpid` to the PID of the process whose Device
+VA is being resolved, as visible in the XDS caller's PID namespace. The kernel
+module resolves it with `find_vpid()`; the library does not substitute its own
+PID.
 
 The `xds_kernel_module` target is opt-in and never runs as part of the normal
 build. Loading the resulting module changes host-wide kernel state and must be

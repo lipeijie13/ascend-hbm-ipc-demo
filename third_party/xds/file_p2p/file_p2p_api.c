@@ -156,7 +156,7 @@ to_read:
         goto free_ext_out;
     }
 
-    read->desc.hostpid = getpid();
+    read->desc.hostpid = param->hostpid;
     read->desc.devid = param->devid;
     read->desc.vfid = param->vfid;
     read->desc.addr = param->addr;
@@ -172,10 +172,10 @@ to_read:
         err = -errno;
         fprintf(stderr,
                 "ioctl IOCTL_READ_FILE failed: errno=%d (%s) file=%s bdev=%s "
-                "offset=%lu addr=0x%lx size=%u devid=%u vfid=%u extents=%u\n",
+                "offset=%lu addr=0x%lx size=%u hostpid=%d devid=%u vfid=%u extents=%u\n",
                 -err, strerror(-err), param->file_name, param->bdev_name,
                 param->bdev_offset, param->addr, param->size,
-                param->devid, param->vfid, ext_num);
+                param->hostpid, param->devid, param->vfid, ext_num);
         goto free_read_out;
     }
 
@@ -274,7 +274,7 @@ int read_file_batch(int dev_fd, struct read_parameter *param, int param_num)
         goto free_ext_out;
     }
 
-    read->desc.hostpid = getpid();
+    read->desc.hostpid = param[0].hostpid;
     read->desc.devid = param[0].devid;
     read->desc.vfid = param[0].vfid;
     read->desc.count = param_num;
@@ -301,9 +301,9 @@ int read_file_batch(int dev_fd, struct read_parameter *param, int param_num)
         err = -errno;
         fprintf(stderr,
                 "ioctl IOCTL_READ_FILE_BATCH failed: errno=%d (%s) file=%s bdev=%s "
-                "requests=%d extents=%u\n",
+                "requests=%d hostpid=%d extents=%u\n",
                 -err, strerror(-err), param[0].file_name, param[0].bdev_name,
-                param_num, ext_num);
+                param_num, param[0].hostpid, ext_num);
         goto free_read_out;
     }
 

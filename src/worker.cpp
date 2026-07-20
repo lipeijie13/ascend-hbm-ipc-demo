@@ -69,6 +69,7 @@ int main(int argc, char **argv)
         WireMessage hello = MakeMessage(MessageType::kHello);
         hello.deviceId = options.deviceId;
         hello.barePid = acl.BarePid();
+        hello.processPid = static_cast<int32_t>(::getpid());
         SendMessage(control.Get(), hello);
 
         const WireMessage descriptor = ReceiveMessage(control.Get(), MessageType::kExportBuffer);
@@ -81,6 +82,9 @@ int main(int argc, char **argv)
         const bool descriptorRequestsXds = (descriptor.flags & kWireFlagXdsRead) != 0;
         if (descriptorRequestsXds != options.xdsMode) {
             throw std::runtime_error("Client and Worker disagree on XDS mode");
+        }
+        if (options.xdsMode && descriptor.processPid <= 0) {
+            throw std::runtime_error("Client descriptor contains an invalid process PID for XDS");
         }
 
         // Worker owns only the imported mapping. It must use
@@ -104,10 +108,14 @@ int main(int argc, char **argv)
             request.size = descriptor.size;
             request.deviceId = static_cast<uint32_t>(options.deviceId);
             request.vfId = options.vfId;
+            request.clientPid = descriptor.processPid;
+            std::cout << "[Worker] submitting XDS read with Client PID: client_pid="
+                      << request.clientPid << ", imported_ptr=" << imported.Get() << std::endl;
             const XdsReadResult result = XdsReadFileToHbm(request);
             std::cout << "[Worker] XDS read completed directly into imported_ptr: file=" << options.sourceFile
                       << ", block_device=" << options.blockDevice << ", offset=" << options.fileOffset
-                      << ", bytes=" << descriptor.size << ", submit_us=" << result.submitElapsedUs
+                      << ", bytes=" << descriptor.size << ", client_pid=" << descriptor.processPid
+                      << ", submit_us=" << result.submitElapsedUs
                       << ", drain_us=" << result.drainElapsedUs << std::endl;
 #endif
         } else {

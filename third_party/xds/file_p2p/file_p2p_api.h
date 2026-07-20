@@ -5,6 +5,8 @@ struct read_parameter {
     const char *file_name;
     const char *bdev_name;
     unsigned long bdev_offset;
+    // Process ID visible in the XDS caller's PID namespace.
+    int hostpid;
     unsigned short devid;
     unsigned short vfid;
     unsigned int size;

@@ -16,6 +16,9 @@ struct XdsReadRequest {
     uint64_t size = 0;
     uint32_t deviceId = 0;
     uint32_t vfId = 0;
+    // PID as seen in the Worker's PID namespace. The XDS kernel module uses
+    // find_vpid() in that namespace before resolving the Client Device VA.
+    int32_t clientPid = -1;
 };
 
 struct XdsReadResult {

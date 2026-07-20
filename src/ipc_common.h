@@ -26,7 +26,7 @@
 namespace ascend_hbm_ipc_demo {
 
 constexpr uint32_t kProtocolMagic = 0x41495043U;  // "AIPC"
-constexpr uint32_t kProtocolVersion = 2;
+constexpr uint32_t kProtocolVersion = 3;
 constexpr uint32_t kWireFlagXdsRead = 1U << 0;
 constexpr size_t kIpcKeyLength = 65;
 constexpr size_t kHugePageSize = 2UL * 1024UL * 1024UL;
@@ -55,6 +55,7 @@ struct WireMessage {
     uint32_t flags;
     int32_t deviceId;
     int32_t barePid;
+    int32_t processPid;
     uint64_t bufferId;
     uint64_t generation;
     uint64_t size;
@@ -74,6 +75,7 @@ inline WireMessage MakeMessage(MessageType type)
     message.type = static_cast<uint32_t>(type);
     message.deviceId = -1;
     message.barePid = -1;
+    message.processPid = -1;
     return message;
 }
 

@@ -113,13 +113,15 @@ int main(int argc, char **argv)
             descriptor.flags = options.xdsMode ? kWireFlagXdsRead : 0;
             descriptor.deviceId = options.deviceId;
             descriptor.barePid = acl.BarePid();
+            descriptor.processPid = static_cast<int32_t>(::getpid());
             descriptor.bufferId = kBufferId;
             descriptor.generation = kGeneration;
             descriptor.size = owner.Size();
             descriptor.key = exported.Key();
             SendMessage(control.Get(), descriptor);
             published = true;
-            std::cout << "[Client] 65-byte IPC Key exported and sent with PID whitelist enabled" << std::endl;
+            std::cout << "[Client] 65-byte IPC Key exported and sent with PID whitelist enabled: client_pid="
+                      << descriptor.processPid << ", client_bare_pid=" << descriptor.barePid << std::endl;
 
             WireMessage imported = ReceiveMessage(control.Get(), MessageType::kImported);
             ValidateBufferIdentity(imported, kBufferId, kGeneration);
