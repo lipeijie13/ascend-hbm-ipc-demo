@@ -56,6 +56,12 @@ if(ENABLE_XDS)
     target_compile_options(xds_reader_test PRIVATE
       -Wall -Wextra -Wpedantic -Werror)
     add_test(NAME xds_reader_preflight COMMAND xds_reader_test)
+
+    add_executable(xds_kernel_contract_test tests/xds_kernel_contract_test.cpp)
+    target_compile_options(xds_kernel_contract_test PRIVATE
+      -Wall -Wextra -Wpedantic -Werror)
+    add_test(NAME xds_kernel_pa_pin_lifetime
+      COMMAND xds_kernel_contract_test "${CMAKE_CURRENT_SOURCE_DIR}/third_party/xds/p2p_dev.c")
   endif()
 endif()
 

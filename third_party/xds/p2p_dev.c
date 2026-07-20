@@ -55,6 +55,10 @@ struct p2p_io_context {
     u64 start_time;
     u64 end_time;
     int count;
+    struct devmm_svm_process_id pa_process;
+    u64 pa_addr;
+    u64 pa_bytes;
+    bool pa_pinned;
 };
 
 struct p2p_batch {
@@ -192,7 +196,8 @@ static void dump_pa_content(unsigned long pa, unsigned int size)
 static void dump_pa_content(unsigned long pa, unsigned int size) {}
 #endif
 
-static int get_pa_list(const struct va_desc *desc, u64 **_pa_list, unsigned int *_pa_num, unsigned int *_pa_size)
+static int get_pa_list(const struct va_desc *desc, u64 **_pa_list, unsigned int *_pa_num, unsigned int *_pa_size,
+                       struct devmm_svm_process_id *_process_id, u64 *_aligned_addr, u64 *_aligned_size)
 {
     struct devmm_svm_process_id pid;
     u64 addr, aligned_addr;
@@ -233,11 +238,12 @@ static int get_pa_list(const struct va_desc *desc, u64 **_pa_list, unsigned int 
         return err;
     }
 
-    devmm_put_mem_pa_list(&pid, aligned_addr, aligned_size, pa_list, pa_num);
-
     *_pa_list = pa_list;
     *_pa_num = pa_num;
     *_pa_size = page_size;
+    *_process_id = pid;
+    *_aligned_addr = aligned_addr;
+    *_aligned_size = aligned_size;
 
     return addr - aligned_addr;
 }
@@ -336,6 +342,8 @@ static int get_pa_list_batch(const struct va_desc_ba *desc, u64 **_pa_list, unsi
 static int dump_pa(void __user *arg)
 {
     struct va_desc desc;
+    struct devmm_svm_process_id process_id;
+    u64 aligned_addr, aligned_size;
     u64 *pa_list;
     unsigned int pa_num, pa_size;
     int err;
@@ -344,24 +352,31 @@ static int dump_pa(void __user *arg)
         return -EFAULT;
     }
 
-    err = get_pa_list(&desc, &pa_list, &pa_num, &pa_size);
+    err = get_pa_list(&desc, &pa_list, &pa_num, &pa_size, &process_id, &aligned_addr, &aligned_size);
     if (err) {
         return err;
     }
 
+    devmm_put_mem_pa_list(&process_id, aligned_addr, aligned_size, pa_list, pa_num);
     kvfree(pa_list);
     return 0;
 }
 
 static void free_io_ctx(struct p2p_io_context *io_ctx)
 {
+    if (io_ctx->pa_pinned) {
+        devmm_put_mem_pa_list(&io_ctx->pa_process, io_ctx->pa_addr, io_ctx->pa_bytes,
+                              io_ctx->pa_list, io_ctx->pa_num);
+        io_ctx->pa_pinned = false;
+    }
     kvfree(io_ctx->cmd_list);
     kvfree(io_ctx->pa_list);
     kfree(io_ctx);
 }
 
 static struct p2p_io_context *new_io_ctx(struct block_device *bdev, const struct read_desc *desc,
-       u64 *pa_list, unsigned int pa_num, unsigned int pa_size, unsigned int data_size)
+       u64 *pa_list, unsigned int pa_num, unsigned int pa_size, unsigned int data_size,
+       const struct devmm_svm_process_id *pa_process, u64 pa_addr, u64 pa_bytes)
 {
     struct p2p_io_context *io_ctx;
     unsigned int nr;
@@ -386,6 +401,10 @@ static struct p2p_io_context *new_io_ctx(struct block_device *bdev, const struct
     io_ctx->pa_size = pa_size;
     io_ctx->data_size = data_size;
     io_ctx->count = nr;
+    io_ctx->pa_process = *pa_process;
+    io_ctx->pa_addr = pa_addr;
+    io_ctx->pa_bytes = pa_bytes;
+    io_ctx->pa_pinned = true;
     io_ctx->start_time = ktime_get_ns();
 
     atomic_set(&io_ctx->io_ref, 1);
@@ -705,20 +724,24 @@ static int p2p_read_file(struct p2p_batch *batch, void __user *arg)
     unsigned int pa_num;
     unsigned int pa_size;
     unsigned int ext_num;
-    int err;
+    int err = 0;
     int addr_off;
+    struct devmm_svm_process_id pa_process;
+    u64 pa_addr, pa_bytes;
+    bool pa_pinned = false;
 
     if (copy_from_user(&desc, user_desc, sizeof(desc))) {
         return -EFAULT;
     }
 
-    addr_off = get_pa_list(&desc.desc, &pa_list, &pa_num, &pa_size);
+    addr_off = get_pa_list(&desc.desc, &pa_list, &pa_num, &pa_size, &pa_process, &pa_addr, &pa_bytes);
     if (addr_off < 0) {
         pr_err("p2p_dev: READ_FILE rejected during PA query hostpid=%d devid=%u vfid=%u addr=0x%lx size=%lu ret=%d\n",
                desc.desc.hostpid, desc.desc.devid, desc.desc.vfid,
                desc.desc.addr, desc.desc.size, addr_off);
         return addr_off;
     }
+    pa_pinned = true;
     pr_info("p2p_dev: READ_FILE request hostpid=%d devid=%u vfid=%u addr=0x%lx size=%lu pa_num=%u pa_size=%u addr_off=%d file_fd=%d bdev_fd=%d ext_num=%u\n",
             desc.desc.hostpid, desc.desc.devid, desc.desc.vfid,
             desc.desc.addr, desc.desc.size, pa_num, pa_size, addr_off,
@@ -766,12 +789,13 @@ static int p2p_read_file(struct p2p_batch *batch, void __user *arg)
         goto free_ext_out;
     }
 
-    io_ctx = new_io_ctx(bdev, &desc, pa_list, pa_num, pa_size, data_size);
+    io_ctx = new_io_ctx(bdev, &desc, pa_list, pa_num, pa_size, data_size, &pa_process, pa_addr, pa_bytes);
     if (IS_ERR(io_ctx)) {
         err = PTR_ERR(io_ctx);
         goto free_ext_out;
     }
     pa_list = NULL;
+    pa_pinned = false;
     io_ctx->pa_offset = addr_off;
 
     io_ctx->issue_err = do_read_ios(io_ctx, extents, ext_num);
@@ -792,6 +816,8 @@ put_bdev_file_out:
 put_reg_file_out:
     fput(reg_file);
 free_pa_out:
+    if (pa_pinned)
+        devmm_put_mem_pa_list(&pa_process, pa_addr, pa_bytes, pa_list, pa_num);
     kvfree(pa_list);
     return err;
 }

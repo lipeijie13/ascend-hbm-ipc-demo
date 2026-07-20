@@ -11,7 +11,9 @@ post-`6576f2d9` correctness fixes. That branch is the source of truth for this
 demo snapshot. The userspace library is built only with `ENABLE_XDS=ON`.
 Callers must set `read_parameter.hostpid` to the PID of the process whose Device
 VA is being resolved. A zero value preserves the original behavior and falls
-back to the XDS caller's `getpid()`.
+back to the XDS caller's `getpid()`. The single-request `read_file` path keeps
+the DEVMM physical-address list pinned until `drain_read` completes; the legacy
+batch path does not yet provide the same lifetime guarantee.
 
 The `xds_kernel_module` target is opt-in and never runs as part of the normal
 build. Loading the resulting module changes host-wide kernel state and must be
