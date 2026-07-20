@@ -68,8 +68,6 @@ int main(int argc, char **argv)
 
         WireMessage hello = MakeMessage(MessageType::kHello);
         hello.deviceId = options.deviceId;
-        hello.barePid = acl.BarePid();
-        hello.processPid = static_cast<int32_t>(::getpid());
         SendMessage(control.Get(), hello);
 
         const WireMessage descriptor = ReceiveMessage(control.Get(), MessageType::kExportBuffer);
@@ -83,8 +81,11 @@ int main(int argc, char **argv)
         if (descriptorRequestsXds != options.xdsMode) {
             throw std::runtime_error("Client and Worker disagree on XDS mode");
         }
-        if (options.xdsMode && descriptor.processPid <= 0) {
-            throw std::runtime_error("Client descriptor contains an invalid process PID for XDS");
+        if (options.xdsMode
+            && (descriptor.ownerPid <= 0 || descriptor.ownerBase == 0
+                || descriptor.ownerBase > std::numeric_limits<uintptr_t>::max()
+                || descriptor.size > std::numeric_limits<uintptr_t>::max() - descriptor.ownerBase)) {
+            throw std::runtime_error("Client descriptor contains an invalid HBM owner PID or address for XDS");
         }
 
         // Worker owns only the imported mapping. It must use
@@ -104,17 +105,19 @@ int main(int argc, char **argv)
             request.filePath = options.sourceFile;
             request.blockDevice = options.blockDevice;
             request.fileOffset = options.fileOffset;
-            request.destinationAddress = reinterpret_cast<uintptr_t>(imported.Get());
+            request.destinationAddress = static_cast<uintptr_t>(descriptor.ownerBase);
             request.size = descriptor.size;
             request.deviceId = static_cast<uint32_t>(options.deviceId);
             request.vfId = options.vfId;
-            request.clientPid = descriptor.processPid;
-            std::cout << "[Worker] submitting XDS read with Client PID: client_pid="
-                      << request.clientPid << ", imported_ptr=" << imported.Get() << std::endl;
+            request.destinationProcessId = descriptor.ownerPid;
+            std::cout << "[Worker] submitting XDS read with Client HBM owner PID: owner_pid="
+                      << request.destinationProcessId
+                      << ", owner_ptr=" << reinterpret_cast<void *>(request.destinationAddress)
+                      << ", imported_ptr=" << imported.Get() << std::endl;
             const XdsReadResult result = XdsReadFileToHbm(request);
             std::cout << "[Worker] XDS read completed directly into imported_ptr: file=" << options.sourceFile
                       << ", block_device=" << options.blockDevice << ", offset=" << options.fileOffset
-                      << ", bytes=" << descriptor.size << ", client_pid=" << descriptor.processPid
+                      << ", bytes=" << descriptor.size << ", owner_pid=" << descriptor.ownerPid
                       << ", submit_us=" << result.submitElapsedUs
                       << ", drain_us=" << result.drainElapsedUs << std::endl;
 #endif

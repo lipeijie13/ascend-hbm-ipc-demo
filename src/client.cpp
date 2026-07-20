@@ -81,7 +81,7 @@ int main(int argc, char **argv)
         AclSession acl(options.deviceId);
         UniqueFd control = ConnectUnixSeqpacket(options.socketPath);
         const WireMessage hello = ReceiveMessage(control.Get(), MessageType::kHello);
-        if (hello.deviceId != options.deviceId || hello.barePid < 0) {
+        if (hello.deviceId != options.deviceId) {
             throw std::runtime_error("Worker HELLO has an invalid or different Device ID");
         }
 
@@ -104,7 +104,7 @@ int main(int argc, char **argv)
 
         // Destruction order is exported -> owner -> ACL session. On the normal
         // path we still close explicitly to make the required ordering clear.
-        ExportedIpcMemory exported(owner.Get(), owner.Size(), hello.barePid);
+        ExportedIpcMemory exported(owner.Get(), owner.Size());
         bool published = false;
         bool workerClosed = false;
         bool exporterClosed = false;
@@ -112,16 +112,16 @@ int main(int argc, char **argv)
             WireMessage descriptor = MakeMessage(MessageType::kExportBuffer);
             descriptor.flags = options.xdsMode ? kWireFlagXdsRead : 0;
             descriptor.deviceId = options.deviceId;
-            descriptor.barePid = acl.BarePid();
-            descriptor.processPid = static_cast<int32_t>(::getpid());
+            descriptor.ownerPid = static_cast<int32_t>(::getpid());
+            descriptor.ownerBase = reinterpret_cast<uintptr_t>(owner.Get());
             descriptor.bufferId = kBufferId;
             descriptor.generation = kGeneration;
             descriptor.size = owner.Size();
             descriptor.key = exported.Key();
             SendMessage(control.Get(), descriptor);
             published = true;
-            std::cout << "[Client] 65-byte IPC Key exported and sent with PID whitelist enabled: client_pid="
-                      << descriptor.processPid << ", client_bare_pid=" << descriptor.barePid << std::endl;
+            std::cout << "[Client] 65-byte IPC Key exported without PID whitelist: owner_pid="
+                      << descriptor.ownerPid << ", owner_ptr=" << owner.Get() << std::endl;
 
             WireMessage imported = ReceiveMessage(control.Get(), MessageType::kImported);
             ValidateBufferIdentity(imported, kBufferId, kGeneration);

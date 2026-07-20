@@ -71,7 +71,7 @@ void ValidateXdsReadRequest(const XdsReadRequest &request)
 {
     Require(!request.filePath.empty(), "XDS source file path is empty");
     Require(!request.blockDevice.empty(), "XDS block device path is empty");
-    Require(request.clientPid > 0, "XDS Client PID is invalid");
+    Require(request.destinationProcessId > 0, "XDS destination owner process ID is invalid");
     Require(request.destinationAddress != 0, "XDS destination address is null");
     Require(request.size > 0 && request.size <= std::numeric_limits<unsigned int>::max(),
             "XDS read size is outside the userspace API range");
@@ -111,7 +111,7 @@ XdsReadResult XdsReadFileToHbm(const XdsReadRequest &request)
     parameter.file_name = request.filePath.c_str();
     parameter.bdev_name = request.blockDevice.c_str();
     parameter.bdev_offset = static_cast<unsigned long>(request.fileOffset);
-    parameter.hostpid = request.clientPid;
+    parameter.hostpid = request.destinationProcessId;
     parameter.devid = static_cast<unsigned short>(request.deviceId);
     parameter.vfid = static_cast<unsigned short>(request.vfId);
     parameter.size = static_cast<unsigned int>(request.size);

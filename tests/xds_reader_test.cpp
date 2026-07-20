@@ -69,11 +69,11 @@ int main()
         request.size = 4096;
         request.deviceId = 0;
         request.vfId = 0;
-        request.clientPid = 1234;
+        request.destinationProcessId = 1234;
 
-        auto missingClientPid = request;
-        missingClientPid.clientPid = 0;
-        ExpectRejected("missing Client PID", missingClientPid);
+        auto missingDestinationProcessId = request;
+        missingDestinationProcessId.destinationProcessId = 0;
+        ExpectRejected("missing destination owner process ID", missingDestinationProcessId);
 
         auto emptyPath = request;
         emptyPath.filePath.clear();
@@ -107,7 +107,7 @@ int main()
         fileRangeOverflow.size = 8192;
         ExpectRejected("file range overflow", fileRangeOverflow);
 
-        std::cout << "PASS: XDS preflight rejects invalid Client PIDs, geometry, file ranges, and block devices"
+        std::cout << "PASS: XDS preflight rejects invalid owner PIDs, geometry, file ranges, and block devices"
                   << std::endl;
         return 0;
     } catch (const std::exception &error) {

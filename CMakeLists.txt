@@ -68,3 +68,16 @@ foreach(target client worker)
   set_target_properties(${target} PROPERTIES
     BUILD_RPATH "${ASCEND_ROOT}/lib64;${ASCEND_ROOT}/x86_64-linux/lib64")
 endforeach()
+
+if(BUILD_TESTING)
+  add_executable(ipc_contract_test tests/ipc_contract_test.cpp)
+  target_include_directories(ipc_contract_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${ASCEND_ACL_INCLUDE_DIR}")
+  target_link_libraries(ipc_contract_test PRIVATE "${ASCENDCL_LIBRARY}")
+  target_compile_options(ipc_contract_test PRIVATE
+    -Wall -Wextra -Wpedantic -Werror)
+  set_target_properties(ipc_contract_test PROPERTIES
+    BUILD_RPATH "${ASCEND_ROOT}/lib64;${ASCEND_ROOT}/x86_64-linux/lib64")
+  add_test(NAME ipc_export_without_pid_whitelist COMMAND ipc_contract_test)
+endif()

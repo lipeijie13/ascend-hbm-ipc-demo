@@ -220,11 +220,12 @@ flowchart LR
     H -->|"Client D2H verification"| V["compare with source range"]
 ```
 
-Worker 在该分支不调用 `aclrtMemcpy` 搬运 payload。它把 `aclrtIpcMemImportByKey` 返回的 Worker 本地 VA 直接写入
-`read_parameter.addr`，`read_file` 成功后调用 `drain_read`，只有 drain 成功才通知 Client。Client 随后从 Owner VA
-D2H 并逐字节对比源文件范围。Client 同时通过 IPC 描述符发送自己的 `getpid()`；Client 和 Worker 必须位于
-相同 PID namespace。Worker 将该 PID 写入 `read_parameter.hostpid`，XDS 不再默认使用 Worker 的 `getpid()`。
-ACL IPC 白名单仍单独使用 `aclrtDeviceGetBareTgid()` 返回的 Bare TGID。
+Worker 在该分支不调用 `aclrtMemcpy` 搬运 payload。Client 通过 IPC 描述符发送 HBM owner VA 和 `getpid()`；Worker
+保留 `aclrtIpcMemImportByKey` 返回的本地 mapping 以维持共享关系和生命周期，但按参考实现将 Client owner VA 写入
+`read_parameter.addr`，并将 PID 作为 `destinationProcessId` 写入 `read_parameter.hostpid`。因此 `read_file` 解析的是
+Client SVM 地址空间，而不是默认使用 Worker 的 `getpid()`。`read_file` 成功后调用 `drain_read`，只有 drain 成功才
+通知 Client；Client 随后从 Owner VA D2H 并逐字节对比源文件范围。Demo 不调用 `aclrtIpcMemSetImportPid`，即 ACL IPC
+PID 白名单校验保持关闭。
 
 使用脚本自动在仓库根目录创建并清理测试文件、自动解析文件系统块设备。在容器内运行时，仓库目录应位于
 本地 NVMe 的 bind mount 上；脚本会拒绝 Docker OverlayFS：

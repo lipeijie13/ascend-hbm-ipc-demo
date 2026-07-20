@@ -156,7 +156,7 @@ to_read:
         goto free_ext_out;
     }
 
-    read->desc.hostpid = param->hostpid;
+    read->desc.hostpid = param->hostpid > 0 ? param->hostpid : getpid();
     read->desc.devid = param->devid;
     read->desc.vfid = param->vfid;
     read->desc.addr = param->addr;
@@ -274,7 +274,7 @@ int read_file_batch(int dev_fd, struct read_parameter *param, int param_num)
         goto free_ext_out;
     }
 
-    read->desc.hostpid = param[0].hostpid;
+    read->desc.hostpid = param[0].hostpid > 0 ? param[0].hostpid : getpid();
     read->desc.devid = param[0].devid;
     read->desc.vfid = param[0].vfid;
     read->desc.count = param_num;

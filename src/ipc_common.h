@@ -26,7 +26,7 @@
 namespace ascend_hbm_ipc_demo {
 
 constexpr uint32_t kProtocolMagic = 0x41495043U;  // "AIPC"
-constexpr uint32_t kProtocolVersion = 3;
+constexpr uint32_t kProtocolVersion = 4;
 constexpr uint32_t kWireFlagXdsRead = 1U << 0;
 constexpr size_t kIpcKeyLength = 65;
 constexpr size_t kHugePageSize = 2UL * 1024UL * 1024UL;
@@ -47,15 +47,16 @@ enum class MessageType : uint32_t {
 
 // This is a same-host, same-binary demo wire format. A production protocol
 // should use protobuf or another versioned serializer instead of sending a C++
-// struct directly. No process-local pointer is sent across the socket.
+// struct directly. ownerBase is Client Device-VA metadata for XDS SVM
+// resolution; the Worker never dereferences it in its own address space.
 struct WireMessage {
     uint32_t magic;
     uint32_t version;
     uint32_t type;
     uint32_t flags;
     int32_t deviceId;
-    int32_t barePid;
-    int32_t processPid;
+    int32_t ownerPid;
+    uint64_t ownerBase;
     uint64_t bufferId;
     uint64_t generation;
     uint64_t size;
@@ -74,8 +75,7 @@ inline WireMessage MakeMessage(MessageType type)
     message.version = kProtocolVersion;
     message.type = static_cast<uint32_t>(type);
     message.deviceId = -1;
-    message.barePid = -1;
-    message.processPid = -1;
+    message.ownerPid = -1;
     return message;
 }
 
@@ -325,13 +325,6 @@ public:
     AclSession(const AclSession &) = delete;
     AclSession &operator=(const AclSession &) = delete;
 
-    int32_t BarePid() const
-    {
-        int32_t pid = -1;
-        CheckAcl(aclrtDeviceGetBareTgid(&pid), "aclrtDeviceGetBareTgid");
-        return pid;
-    }
-
 private:
     int32_t deviceId_;
     bool initialized_ = false;
@@ -399,23 +392,12 @@ private:
 
 class ExportedIpcMemory {
 public:
-    ExportedIpcMemory(void *devicePtr, size_t size, int32_t workerBarePid)
+    ExportedIpcMemory(void *devicePtr, size_t size)
     {
-        // Keep the default PID whitelist behavior. The Worker Bare TGID is
-        // explicitly authorized below before the Key leaves this process.
         CheckAcl(aclrtIpcMemGetExportKey(devicePtr, size, key_.data(), key_.size(),
                                          ACL_RT_IPC_MEM_EXPORT_FLAG_DEFAULT),
                  "aclrtIpcMemGetExportKey");
         open_ = true;
-        try {
-            // 【可选】设置worker进程到白名单，不调用时默认不启动白名单校验。
-            CheckAcl(aclrtIpcMemSetImportPid(key_.data(), &workerBarePid, 1),
-                     "aclrtIpcMemSetImportPid");
-        } catch (...) {
-            (void)aclrtIpcMemClose(key_.data());
-            open_ = false;
-            throw;
-        }
     }
 
     ~ExportedIpcMemory()
